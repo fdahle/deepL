@@ -6,8 +6,10 @@ from PIL import Image
 from load import *
 from functions import *
 
-num_iterations = 2500
-learning_rate = 0.05
+path = "C:/Users/felix/Google Drive/Coding/deepLearn"
+
+num_iterations = 1500
+learning_rate = 0.0075
 print_cost = True
 
 train_x, train_y, test_x, test_y, classes = load_dataset()
@@ -17,7 +19,9 @@ print_info(train_x, train_y, test_x, test_y)
 deepL = DeepLearner()
 
 #Gradient descent
-deepL.optimize(train_x, train_y, [20, 7, 5], num_iterations, learning_rate, print_cost=True, random_seed=3)
+deepL.optimize(train_x, train_y, [10,2], num_iterations, learning_rate, print_cost=True, random_seed=1)
+deepL.saveModel("test")
+deepL.loadModel(path + "/test.pkl")
 
 #Predict test/train set examples
 Y_prediction_test = deepL.predict(test_x)
