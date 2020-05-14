@@ -1,6 +1,11 @@
 import numpy as np
 
 def sigmoid(Z):
+
+    #prevents an overflow of the values (precision too high)
+    Z = np.clip(Z, -500,500)
+
+    #calculate simgoid
     A = 1/(1+np.exp(-Z))
     cache = Z
     return A, cache
@@ -47,6 +52,8 @@ def initialize_params(layer_dims):
     #reset
     parameters = {}
     L = len(layer_dims)
+
+    print("TODO: Different init of the weights")
 
     for l in range(1, L):
         parameters['W' + str(l)] = np.random.randn(layer_dims[l], layer_dims[l-1]) * 0.01
@@ -117,12 +124,24 @@ def L_model_backward(AL, Y, caches):
 
     return grads
 
-def compute_cost(AL, Y):
+def compute_cost(AL, Y, costType):
+
     m = Y.shape[1]
-    cost = -1./m * np.sum(Y*np.log(AL) + (1 - Y)*np.log(1 - AL))
+
+    #cross entropy
+    if costType == "crossEntropy":
+        cost = -1./m * np.sum(Y*np.log(AL) + (1 - Y)*np.log(1 - AL))
+
+    #focal loss -> https://arxiv.org/pdf/1708.02002.pdf
+    #https://towardsdatascience.com/handling-imbalanced-datasets-in-deep-learning-f48407a0e758
+    elif costType == "focalLoss":
+        gamma = 2.0
+        alpha = 0.25
+        pt_1 = np.where(np.equal(Y, 1), AL, np.ones(AL.shape))
+        pt_0 = np.where(np.equal(Y, 0), AL, np.zeros(AL.shape))
+        cost = -np.mean(alpha * np.power(1. - pt_1, gamma) * np.log(pt_1)) - np.mean((1-alpha) * np.power(pt_0, gamma) * np.log(1. - pt_0))
 
     cost = np.squeeze(cost)
-
     return cost
 
 def update_parameters(parameters, grads, learning_rate):
@@ -134,3 +153,14 @@ def update_parameters(parameters, grads, learning_rate):
         parameters["b" + str(l+1)] = parameters["b" + str(l+1)] - learning_rate * grads["db" + str(l+1)]
 
     return parameters
+
+def reshape(data, dataType):
+    _data = data.reshape(data.shape[0], -1).T
+    #standardize
+    if (dataType == "images"):
+        _data = _data / 255.
+    return _data
+
+def hasNaN(data):
+    sum = np.sum(data)
+    return np.isnan(sum)
