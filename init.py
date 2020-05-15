@@ -12,14 +12,17 @@ num_iterations = 1500
 learning_rate = 0.0075
 print_cost = True
 
-train_x, train_y = load_data_change("datasets/trainSet_123.pkl")
-test_x, test_y = load_data_change("datasets/testSet_123.pkl")
+#train_x, train_y = load_data_change("datasets/trainSet_123.pkl")
+#test_x, test_y = load_data_change("datasets/testSet_123.pkl")
 
-#train_x, train_y, test_x, test_y, classes = load_data_cats()
+train_x, train_y, test_x, test_y, classes = load_data_cats()
 
 #get info from the data
-print_info(train_x, train_y, test_x, test_y)
+train_x = convert_grayscale(train_x)
+test_x = convert_grayscale(test_x)
 
+print_info(train_x, train_y, test_x, test_y)
+exit()
 deepL = DeepLearner()
 deepL.setTrainingParams(layer_dims = [16,8,4], num_iterations=num_iterations,
                         learning_rate=learning_rate, loss="crossEntropy")

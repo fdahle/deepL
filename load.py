@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import h5py
 from matplotlib import pyplot as plt
+import skimage.color
 
 def load_data_change(path):
     data = pd.read_pickle(path)
@@ -28,8 +29,6 @@ def load_data_change(path):
     y.fillna(value=0, inplace=True)
 
     return X,y
-
-
 
 def load_data_cats():
     train_dataset = h5py.File('datasets/train_catvnoncat.h5', "r")
@@ -60,7 +59,7 @@ def print_info(train_x, train_y, test_x, test_y):
     #try to determine type of data
     if len(train_x.shape) == 2:
         type = "data"
-    if len(train_x.shape) == 4:
+    if len(train_x.shape) > 2:
         type = "image"
 
     m_train = train_x.shape[0]
@@ -71,12 +70,24 @@ def print_info(train_x, train_y, test_x, test_y):
     if type == "image":
         x_size = train_x.shape[1]
         y_size = train_x.shape[2]
-        num_bands = train_x.shape[3]
+
+        if len(train_x.shape) == 3:
+            num_bands = 1
+        else:
+            num_bands = train_x.shape[3]
+
         print("Image size: " + str(x_size) + "x" + str(y_size))
         print("Number of bands:", num_bands)
 
     print("")
 
-def display_image(array):
-    plt.imshow(array, interpolation='nearest')
+def convert_grayscale(data):
+    returnData = []
+    for i in range(data.shape[0]):
+        img = skimage.color.rgb2gray(data[i])
+        returnData.append(img)
+    return np.asarray(returnData)
+
+def display_image(img):
+    plt.imshow(img, interpolation='nearest')
     plt.show()

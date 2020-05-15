@@ -7,9 +7,10 @@ from utils import *
 
 class DeepLearner:
 
-    def __init__(self, dataType="data"):
+    def __init__(self, type='classic', dataType="data"):
 
-        #save dataType
+        #save basic params
+        self.type = type #"classic", "cnn"
         self.dataType = dataType #"data", "images"
 
         #save params of the model
