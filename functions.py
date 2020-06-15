@@ -1,247 +1,227 @@
 import numpy as np
-import matplotlib.pyplot as plt
-import pickle
-import os
-import sys
-from utils import *
-
-class DeepLearner:
+from numba import jit
 
-    def __init__(self, type='classic', dataType="data"):
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import log_loss
 
-        #save basic params
-        self.type = type #"classic", "cnn"
-        self.dataType = dataType #"data", "images"
+#add input and output layer to layerDims
+def adapt_layer(layer_dims, activation, inputSize, numClasses):
 
-        #save params of the model
-        self.parameters = None
-        self.costs = None
+    #add input layer
+    layer_dims.insert(0, inputSize)
 
-        #save training params
-        self.layer_dims = None
-        self.learning_rate = None
-        self.num_iterations = None
-        self.early_stopping = None
+    #add output layers
+    layer_dims.append(numClasses)
 
-        #save input params
-        self.num_trainingData = None
+    #output layer is dependent on number of classes
+    if numClasses == 1:
+        activation.append("sigmoid")
+    else:
+        activation.append("softmax")
 
-        self.imageSizeX = None
-        self.imageSizeY = None
-        self.imageBands = None
+    return layer_dims
 
-        #save random seed
-        self.random_seed = None
+#initalize weight and bias based on the layer of the network
+def init_params(layer_dims):
 
-    def getParams(self):
-        params = {'w': w, 'b': b}
-        return params
-
-    def getGrads(self):
-        grads = {'dw': dw, 'db': db}
-        return grads
-
-    def getCosts(self):
-        return costs
+    #weight and bias is stored as a dict
+    parameters = {}
 
-    def setTrainingParams(self, layer_dims, num_iterations=None, learning_rate=None, early_stopping=None, loss=None):
+    #get the number of layers
+    L = len(layer_dims)
 
-        if layer_dims is not None:
-            self.layer_dims = layer_dims
-        if num_iterations is not None:
-            self.num_iterations = num_iterations
-        if learning_rate is not None:
-            self.learning_rate = learning_rate
-        if early_stopping is not None:
-            self.early_stopping = early_stopping
-        if loss is not None:
-            self.loss = loss
+    #iterate all layers
+    for i in range(L-1):
+        idx = i + 1
+        parameters['W' + str(idx)] = np.random.randn(layer_dims[idx], layer_dims[idx-1]) * 0.1
+        parameters['b' + str(idx)] = np.random.randn(layer_dims[idx], 1) * 0.1
 
-    def optimize(self, X_input, Y_input, print_cost=False, print_iter = 100, random_seed=1, silent=True):
+    return parameters
 
-        #copy in order not to change the original data
-        X = np.asarray(X_input).copy()
-        Y = np.asarray(Y_input).copy()
+#defines the output of a certain neuron based on type
+def activation_func(Z, type, direction, dA=0):
 
-        np.random.seed(random_seed)
-        self.random_seed = random_seed
-        self.num_trainingData = X.shape[0]
+    #prevents an overflow of the values (precision too high)
+    Z = np.clip(Z, -500,500)
 
-        #check training_params
-        assert self.layer_dims is not None, "layer_dims is not initialized"
-        assert self.num_iterations is not None, "num_iterations is not initialized"
-        assert self.learning_rate is not None, "learning_rate is not initialized"
+    if type == "sigmoid":
+        if direction == "forward":
+            output = 1/(1+np.exp(-Z))
+        if direction == "backward":
+            sig = activation_func(Z, "sigmoid", "forward")
+            output = dA * sig * (1 - sig)
 
-        if self.dataType =="image":
-            self.imageSizeX = X.shape[1]
-            self.imageSizeY = X.shape[2]
-            self.imageBands = X.shape[3]
+    if type == "relu":
+        if direction == "forward":
+            output = np.maximum(0,Z)
+        if direction == "backward":
+            output = np.array(dA, copy = True)
+            output[Z <= 0] = 0
 
-        X = reshape(X, self.dataType)
-        if (len(Y.shape) == 1):
-            Y = reshape(Y, self.dataType)
+    if type == "softmax":
+        if direction == "forward":
+            shiftz = Z - np.max(Z) # this makes softmax more stable
+            temp = np.exp(Z)
+            output = temp/np.sum(temp, axis = 0)
+            print("TODO CHECK AXIS 0")
 
-        if (hasNaN(X)):
-            print("X has NaN-values. These are replaced with 0")
-            X[np.isnan(X)] = 0
+        if direction == "backward":
+            shiftz = dA - np.max(dA) # this makes softmax more stable
+            t_exp = np.exp(shiftz)
+            sum = np.sum(t_exp)
 
-        layer_dims = self.layer_dims
-        layer_dims.insert(0, X.shape[0])
-        layer_dims.append(1)
+            output = -t_exp * t_exp / (sum ** 2)
 
+            for i, elem in enumerate(dA):
+                idx = np.squeeze(np.nonzero(elem))
+                output[i][idx] = t_exp[i][idx] * (sum - t_exp[i][idx]) / (sum ** 2)
 
-        #get number of layers
-        self.num_layers = len(layer_dims)
+    return output
 
-        #init weight and bias
-        self.parameters = initialize_params(layer_dims)
+#execute the forward propagation
+def forward_prop(X, params, activation):
 
-        #reset costs
-        self.costs = []
+    #in this function the value of the nodes are calculated
 
-        #set params for early stopping
-        maxCost = sys.maxsize
-        stopCounter = 0
-        bestParams = []
-        bestCosts = []
+    cache={}
 
-        #train
-        for i in range(self.num_iterations):
+    #copy first input to A (which is used in the loop to contain the data and is
+    #renewed every iteration)
+    A_curr = X
 
-            #forward propagation
-            AL, caches = L_model_forward(X, self.parameters)
+    #iterate through the layers from left to right
+    for i, layer in enumerate(activation):
+        #increase id for 1 as weights and bias are always one step ahead and 0 is not available
+        idx = i + 1
+        A_prev = A_curr
 
-            #compute cost
-            cost = compute_cost(AL, Y, "crossEntropy")
+        #get weights and bias
+        W_curr = params["W" + str(idx)]
+        b_curr = params["b" + str(idx)]
 
-            #if new lowest cost appeared
-            if cost < maxCost:
-                maxCost = cost
-                stopCounter = 0
-                bestParams = self.parameters
-            stopCounter += 1
+        #linear forward
+        Z_curr = np.dot(W_curr, A_prev) + b_curr
 
-            #backwards propagation
-            grads = L_model_backward(AL, Y, caches)
+        #apply activation func
+        A_curr = activation_func(Z_curr, layer, "forward")
 
-            #update parameters
-            self.parameters = update_parameters(self.parameters, grads, self.learning_rate)
+        #save intermedia results in cache
+        cache["A" + str(i)] = A_prev  #<- important here not idx but i
+        cache["Z" + str(idx)] = Z_curr
 
-            #record costs
-            self.costs.append(cost)
+    #A_curr is output at the end nodes
+    #cache contains all intermediate outputs; A[n] contains the input, Z[n+1] the output of this input
+    return A_curr, cache
 
-            #check if the last n rounds didn't improve
-            if self.early_stopping is not None:
-                if stopCounter == self.early_stopping:
-                    self.costs = self.costs[:len(self.costs)-self.early_stopping]
-                    self.parameters = bestParams
-                    print(len(self.costs))
-                    print('Early stopping after iteration %i: %f' % (i-self.early_stopping+1, maxCost))
-                    break
+#execute backwars propagation
+def backward_prop(AL, Y, params, activation, cache, numClasses):
 
-            if print_cost and i%print_iter == 0:
-                print('Cost after iteration %i: %f' % (i, cost))
+    #this dictionary will save the gradients
+    grads = {}
 
-        print('Final cost after iteration %i: %f' % (i, cost))
+    #get number of entries
+    m = Y.shape[1]
 
-    def predictProba(self, X_input):
+    #assure that Y has the same shape as AL
+    #Y = Y.reshape(AL.shape)
 
-        X = np.asarray(X_input).copy()
+    print(AL)
 
-        ## TODO: check if data is prepared or not and only do if not prepared
-        X = reshape(X,"data")
+    #different creation of base gradient based on number of classes
+    if numClasses == 1:
+        dA_prev = -(np.divide(Y, AL) - np.divide(1 - Y, 1 - AL))
+    else:
+        dA_prev = np.zeros((m, numClasses))
+        for i in range(Y.shape[0]):
+            dA_prev[i, Y[i]] = -1 / AL[i, Y[i]]
 
-        m = X.shape[1]
+    #iterate through the layers from right to left
+    for i, layer in reversed(list(enumerate(activation))):
 
-        #compute prob vector
-        n = self.num_layers // 2
-        p = np.zeros((1,m))
+        #increase id for 1 as weights and bias are always one step ahead and 0 is not available
+        idx = i + 1
 
-        probas, caches = L_model_forward(X, self.parameters)
+        dA_curr = dA_prev
 
-        if (np.isnan(np.sum(probas))):
-            print("NaN-values replaced with 0")
-            probas[np.isnan(probas)] = 0
+        #get the values from the cache and params
+        A_prev = cache["A" + str(i)] #<- important here not idx but i
+        Z_curr = cache["Z" + str(idx)]
+        W_curr = params["W" + str(idx)]
+        b_curr = params["b" + str(idx)]
 
-        return(probas[0])
+        #calculate all gradient
+        dZ_curr = activation_func(Z_curr, layer, "backward", dA_curr)
+        dW_curr = np.dot(dZ_curr, A_prev.T) / m
+        db_curr = np.sum(dZ_curr, axis=1, keepdims=True) / m
+        dA_prev = np.dot(W_curr.T, dZ_curr)
 
-    def predict(self, X_input, threshold=0.5):
+        #save the gradient of input, weight and bias
+        grads["dA" + str(i)] = dA_prev
+        grads["dW" + str(idx)] = dW_curr
+        grads["db" + str(idx)] = db_curr
 
-        vec =self.predictProba(X_input)
-        vec = vec[np.newaxis]
-        y_pred = np.zeros((1, vec.shape[1]))
+    return grads
 
-        #TODO: optimze this loop")
-        for i in range(vec.shape[1]):
-            y_pred[0,i] = 1 if vec[0, i] > threshold else 0
+#compute cost for current model
+def compute_cost(AL, Y, numClasses, costType):
 
-        return y_pred[0]
+    #get number of entries
+    m = AL.shape[1]
+    if costType == "crossEntropy":
 
-    def plotCostFunction(self):
-        _costs = np.squeeze(self.costs)
-        plt.plot(_costs)
-        plt.ylabel('cost')
-        plt.xlabel('iterations (in 100)')
-        plt.title('Learning rate =' + str(self.learning_rate))
-        plt.show()
+        if numClasses == 1:
+            cost = -1 / m * (np.dot(Y, np.log(AL).T) + np.dot(1 - Y, np.log(1 - AL).T))
+        else:
+            cost = log_loss(Y.flatten(), AL.T)
 
-    def saveModel(self, filename, path=os.getcwd(), type="pickle"):
+    #convert array to single value
+    cost = np.squeeze(cost)
 
-        modelDict = {}
+    return(cost)
 
-        modelDict["parameters"] = self.parameters
-        modelDict["costs"] = self.costs
+#compute accuracy during training
+def compute_accuracy(AL, Y, numClasses, threshold):
 
-        modelDict["numLayers"] = self.num_layers
-        modelDict["learning_rate"] = self.learning_rate
-        modelDict["num_iterations"] = self.num_iterations
-        modelDict["num_trainingData"] = self.num_trainingData
+    if numClasses == 1:
+        #convert prob to classes
+        Y_pred = np.zeros(AL.shape)
+        Y_pred[AL >= threshold] = 1
+    else:
+        Y_pred = np.argmax(AL, axis=0)
+        Y_pred = np.reshape(Y_pred, (1, -1))
 
-        modelDict["imageSizeX"] = self.imageSizeX
-        modelDict["imageSizeY"] = self.imageSizeY
-        modelDict["imageBands"] = self.imageBands
+    #calc score
+    score = accuracy_score(Y.flatten(), Y_pred.flatten())
 
-        modelDict["random_seed"] = self.random_seed
+    return score
 
-        # TODO: if filename is not valid (.pkl) for example
+#udpdate weight and bias
+def update_params(params, activation, grads, learning_rate):
 
-        if type == "pickle":
-            if (filename.endswith(".pkl")):
-                filename = filename[:-4]
-            f = open(path + "/" + filename + ".pkl", "wb")
-            pickle.dump(modelDict,f)
-            f.close()
+    for i, layer in enumerate(activation):
+        idx = i + 1
+        params["W" + str(idx)] -= learning_rate * grads["dW" + str(idx)]
+        params["b" + str(idx)] -= learning_rate * grads["db" + str(idx)]
+    return params
 
-        elif type == "txt":
-            # TODO:
-            pass
-        elif type == "json":
-            # TODO:
-            pass
-        elif type == "csv":
-            # TODO:
-            pass
+# reshape data so that it can be used by NN
+def reshape(data):
+    #(209, 64, 64) -> (4096, 209) for 209 images with 64x64 resolution
 
-    def loadModel(self, path):
+    _data = data.reshape(data.shape[0], -1).T
 
-        type = path[-3:]
+    return _data
 
-        # TODO: do other types
-        if type == "pkl":
-            file = open(path, 'rb')
-            modelDict = pickle.load(file)
-            file.close()
+#check if a numpy array has NaN values
+def hasNaN(data):
+    sum = np.sum(data)
+    return np.isnan(sum)
 
-        self.parameters = modelDict["parameters"]
-        self.costs = modelDict["costs"]
+#check data and settings for consistency
+def checkErrors(layer_activation, layer_dims, X, Y):
 
-        self.num_layers = modelDict["numLayers"]
-        self.learning_rate = modelDict["learning_rate"]
-        self.iterations = modelDict["num_iterations"]
-        self.num_trainingData = modelDict["num_trainingData"]
+    if len(layer_activation) != len(layer_dims):
+        raise ValueError("Layer dimensions (layer_dims) and activationtype (layer_activation) must have the same size")
 
-        self.imageSizeX = modelDict["imageSizeX"]
-        self.imageSizeY = modelDict["imageSizeY"]
-        self.imageBands = modelDict["imageBands"]
-
-        self.random_seed = modelDict["random_seed"]
+    if X.shape[0] != Y.shape[0]:
+        raise ValueError("X and Y have a different number of entries")
