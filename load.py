@@ -1,4 +1,5 @@
 import h5py
+import pickle
 import numpy as np
 import pandas as pd
 import skimage.color
@@ -16,7 +17,7 @@ def convert_grayscale(data):
     return np.asarray(returnData)
 
 #return subset of data based on different criteria
-def getSubset(data, type, count, seed=123):
+def getSubset(data, type, count, online=False, seed=123):
 
     np.random.seed(123)
 
@@ -37,6 +38,8 @@ def loadExamples(type):
         dataset = loadSonar()
     elif type=="mnist":
         dataset = loadMnist()
+    elif type=="cifar":
+        dataset = loadCifar()
     elif type=="makeMoons":
         dataset = loadMoons()
     else:
@@ -103,6 +106,22 @@ def loadMnist():
     test_y = test_data[:,0]
 
     classes = np.asarray([0,1,2,3,4,5,6,7,8,9])
+
+    return train_x, train_y, test_x, test_y, classes
+
+def loadCifar():
+    with open("datasets/cifar/data_batch_1", 'rb') as file:
+        train_data = pickle.load(file, encoding='bytes')
+    with open("datasets/cifar/test_batch", 'rb') as file:
+        test_data = pickle.load(file, encoding='bytes')
+
+    train_x = np.asarray(train_data.values())
+    train_y = np.asarray(train_data.keys())
+
+    test_x = np.asarray(test_data.values())
+    test_y = np.asarray(test_data.keys())
+
+    classes = np.unique(np.asarray(train_y))
 
     return train_x, train_y, test_x, test_y, classes
 

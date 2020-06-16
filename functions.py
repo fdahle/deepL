@@ -39,7 +39,7 @@ def init_params(layer_dims):
     return parameters
 
 #defines the output of a certain neuron based on type
-def activation_func(Z, type, direction, dA=0):
+def activation_func(Z, type, direction, dA=0, Y=0):
 
     #prevents an overflow of the values (precision too high)
     Z = np.clip(Z, -500,500)
@@ -63,26 +63,18 @@ def activation_func(Z, type, direction, dA=0):
             shiftz = Z - np.max(Z) # this makes softmax more stable
             temp = np.exp(Z)
             output = temp/np.sum(temp, axis = 0)
-            print("TODO CHECK AXIS 0")
-
         if direction == "backward":
-            shiftz = dA - np.max(dA) # this makes softmax more stable
-            t_exp = np.exp(shiftz)
-            sum = np.sum(t_exp)
-
-            output = -t_exp * t_exp / (sum ** 2)
-
-            for i, elem in enumerate(dA):
-                idx = np.squeeze(np.nonzero(elem))
-                output[i][idx] = t_exp[i][idx] * (sum - t_exp[i][idx]) / (sum ** 2)
-
+            temp = np.zeros((Y.shape[1],(int(np.amax(Y)) + 1)))
+            for i, elem in enumerate(Y.T):
+                temp[i, int(elem)] = 1
+            output = dA - temp.T
     return output
 
 #execute the forward propagation
 def forward_prop(X, params, activation):
-
     #in this function the value of the nodes are calculated
 
+    #save intermediate steps in this dict
     cache={}
 
     #copy first input to A (which is used in the loop to contain the data and is
@@ -109,6 +101,7 @@ def forward_prop(X, params, activation):
         cache["A" + str(i)] = A_prev  #<- important here not idx but i
         cache["Z" + str(idx)] = Z_curr
 
+
     #A_curr is output at the end nodes
     #cache contains all intermediate outputs; A[n] contains the input, Z[n+1] the output of this input
     return A_curr, cache
@@ -125,15 +118,11 @@ def backward_prop(AL, Y, params, activation, cache, numClasses):
     #assure that Y has the same shape as AL
     #Y = Y.reshape(AL.shape)
 
-    print(AL)
-
     #different creation of base gradient based on number of classes
     if numClasses == 1:
         dA_prev = -(np.divide(Y, AL) - np.divide(1 - Y, 1 - AL))
     else:
-        dA_prev = np.zeros((m, numClasses))
-        for i in range(Y.shape[0]):
-            dA_prev[i, Y[i]] = -1 / AL[i, Y[i]]
+        dA_prev = AL
 
     #iterate through the layers from right to left
     for i, layer in reversed(list(enumerate(activation))):
@@ -144,13 +133,13 @@ def backward_prop(AL, Y, params, activation, cache, numClasses):
         dA_curr = dA_prev
 
         #get the values from the cache and params
-        A_prev = cache["A" + str(i)] #<- important here not idx but i
+        A_prev = cache["A" + str(i)]
         Z_curr = cache["Z" + str(idx)]
         W_curr = params["W" + str(idx)]
         b_curr = params["b" + str(idx)]
 
         #calculate all gradient
-        dZ_curr = activation_func(Z_curr, layer, "backward", dA_curr)
+        dZ_curr = activation_func(Z_curr, layer, "backward", dA_curr, Y)
         dW_curr = np.dot(dZ_curr, A_prev.T) / m
         db_curr = np.sum(dZ_curr, axis=1, keepdims=True) / m
         dA_prev = np.dot(W_curr.T, dZ_curr)
@@ -169,19 +158,19 @@ def compute_cost(AL, Y, numClasses, costType):
     m = AL.shape[1]
     if costType == "crossEntropy":
 
+        #dependent on number of classes cost is calculated different
         if numClasses == 1:
             cost = -1 / m * (np.dot(Y, np.log(AL).T) + np.dot(1 - Y, np.log(1 - AL).T))
+            cost = cost[0][0] # get single value from cost
         else:
             cost = log_loss(Y.flatten(), AL.T)
-
-    #convert array to single value
-    cost = np.squeeze(cost)
 
     return(cost)
 
 #compute accuracy during training
 def compute_accuracy(AL, Y, numClasses, threshold):
 
+    #dependent on number of classes accuracy is calculated different
     if numClasses == 1:
         #convert prob to classes
         Y_pred = np.zeros(AL.shape)

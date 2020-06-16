@@ -5,6 +5,8 @@ from numba.typed import List
 from functions import *
 import math
 
+import matplotlib.pyplot as plt
+
 #initialize filter with random values
 def init_filters(x, y, num_filters):
 
@@ -159,15 +161,24 @@ def deapply_filter(img, cnnGrad, filters, stride=1):
     fhX = int(filters[0].shape[0] / 2) #filterHalfX
     fhY = int(filters[0].shape[1] / 2) #filterHalfY
 
+    #initialize empty filter gradients
     filterGrads = np.zeros(filters.shape)
 
     for f, filter in enumerate(filters):
 
+        #needed for averaging the filter
+        counter = 0
+
         #iterate over image and apply filter
         for i in range(fhX, img.shape[0] - fhX, stride):
             for j in range(fhY, img.shape[1] - fhY, stride):
-                filterGrads[f] += cnnGrad[f][i-1,j-1] * img[i-fhX:i+fhX+1, j-fhY:j+fhY+1]
 
+                #calculate gradient
+                filterGrads[f] += cnnGrad[f][i-1,j-1] * img[i-fhX:i+fhX+1, j-fhY:j+fhY+1]
+                counter += 1
+
+        #create the average per filter
+        filterGrads[f] = filterGrads[f]/counter
     return filterGrads
 
 #backward propagation for pooling
@@ -236,21 +247,26 @@ def cnn_backward_prop(grads, X, imgShape, cacheF, filters): #cacheF = filteredCa
 
         #get grad for certain image
         grad = grads[i]
-        print(grad)
-
         grad = np.reshape(grad, (len(cacheF[i]),-1))
 
+        #reverse pooling
         grad = upsample(grad, cacheF[i])
+
+        #reshape flattened result to filtered image shape
         img = img.reshape(imgShape[0], imgShape[1])
+
+        #calculate gradient for filter
         grad = deapply_filter(img, grad, filters)
+
         cnnGrads.append(grad)
 
-
-
+    #average filter gradient over all images
     cnnGrads = np.asarray(cnnGrads)
     cnnGrads = cnnGrads.mean(axis=(0))
+
     return cnnGrads
 
+#update the filters based on gradient and learning rate
 def update_filters(filters, gradient, learning_rate):
 
     filters -= learning_rate * gradient

@@ -8,6 +8,7 @@ from visual import *
 
 class DeepLearner():
 
+    #initialize class
     def __init__(self, learning_type="classic", random_seed=123):
 
         #basic settings for training
@@ -15,12 +16,13 @@ class DeepLearner():
         self.random_seed = random_seed
 
         #default settings for training
-        self.layer_dims = [25,50,50,25]
-        self.layer_activation = ["relu","relu","relu","relu"]
+        self.layer_dims = [4,2]
+        self.layer_activation = ["relu","relu"]
         self.numberIterations = 10000
-        self.learning_rate = 0.05
+        self.learning_rate = 0.01
         self.threshold = 0.5
         self.numClasses = None
+        self.early_stopping = None
 
         #default settings for cnn
         self.filters = None
@@ -42,7 +44,7 @@ class DeepLearner():
         self.debug_mode = False
 
     #gives the possibility to change training parameters
-    def setTrainingParams(self, layer_dims=None, layer_activation=None, numberIterations=None, learning_rate=None, threshold=0.5):
+    def setTrainingParams(self, layer_dims=None, layer_activation=None, numberIterations=None, learning_rate=None, threshold=None, early_stopping = None):
 
         if layer_dims is not None:
             self.layer_dims = layer_dims
@@ -54,6 +56,8 @@ class DeepLearner():
             self.learning_rate = learning_rate
         if threshold is not None:
             self.threshold = threshold
+        if early_stopping is not None:
+            self.early_stopping = early_stopping
 
     #gives the possibility to change cnn parameters
     def setCnnParams(self, filterX = None, filterY = None, numFilters = None, filterBias = None, filterStride=None, poolSize=None, poolStride=None):
@@ -82,7 +86,7 @@ class DeepLearner():
             self.debug_mode = debug_mode
 
     #train the network
-    def optimize(self, X_input, Y_input):
+    def optimize(self, X_input, Y_input, verbose=False, verbose_iter=100):
 
         #check data and settings for consistency
         checkErrors(self.layer_activation, self.layer_dims, X_input, Y_input)
@@ -99,7 +103,7 @@ class DeepLearner():
         if self.numClasses == 2: #if number of classes is 2 it can be treated as 1 class (binary )
             self.numClasses = 1
 
-        #check if input values have NaN values
+        #check input values have NaN values
         if (hasNaN(X)):
             print("X has NaN-values. These are replaced with 0")
             X[np.isnan(X)] = 0
@@ -110,7 +114,7 @@ class DeepLearner():
             imgSizeY = X.shape[2]
             imgShape = [imgSizeX, imgSizeY]
 
-        #change image if cnn
+        #normalize image if cnn
         if self.learning_type == "cnn":
             X = (X / 255) - 0.5
 
@@ -146,14 +150,13 @@ class DeepLearner():
         if self.learning_type == "cnn":
             inputLayerChanged = False
 
-        #iterate and # OPTIMIZE:
+        #start training
         for i in range(self.numberIterations):
 
             #execute cnn forward propagation
             if self.learning_type == "cnn":
 
-                if self.debug_mode:
-                    print("   Round " + str(i) + ": CNN forward propagation")
+                if self.debug_mode: print("   Round " + str(i) + ": CNN forward propagation")
 
                 #forward propagation for cnn
                 X, filteredCache = cnn_forward_prop(X_orig, self.filters, imgShape,
@@ -161,7 +164,7 @@ class DeepLearner():
                                                           self.poolStride, self.poolSize)
 
                 #when applying the filters and downsample the input size
-                #is changing and needs to be adapted
+                #is changing and needs to be adapted only once
                 if inputLayerChanged == False:
 
                     #change input layer
@@ -173,41 +176,35 @@ class DeepLearner():
                     #set bool so that the whole if clause is only done once
                     inputLayerChanged = True
 
-            if self.debug_mode:
-                print("   Round " + str(i) + ": forward propagation")
+            if self.debug_mode: print("   Round " + str(i) + ": forward propagation")
 
             #execute forward propagation
             AL, cache = forward_prop(X, self.params, self.layer_activation)
 
-            if self.debug_mode:
-                print("   Round " + str(i) + ": compute costs")
+            if self.debug_mode: print("   Round " + str(i) + ": compute costs")
 
             #compute cost and save
             cost = compute_cost(AL, Y, self.numClasses, "crossEntropy",)
             self.costHistory.append(cost)
 
-            if self.debug_mode:
-                print("   Round " + str(i) + ": compute accuracy")
+            if self.debug_mode: print("   Round " + str(i) + ": compute accuracy")
 
             #compute accuracy and save
             accuracy = compute_accuracy(AL, Y, self.numClasses, self.threshold)
             self.accuracyHistory.append(accuracy)
 
-            if self.debug_mode:
-                print("   Round " + str(i) + ": backward propagation")
+            if self.debug_mode: print("   Round " + str(i) + ": backward propagation")
 
             #execute backwards propagation
             grads = backward_prop(AL, Y, self.params, self.layer_activation, cache, self.numClasses)
 
             if self.learning_type == "cnn":
 
-                if self.debug_mode:
-                    print("   Round " + str(i) + ": CNN backward propagation")
+                if self.debug_mode: print("   Round " + str(i) + ": CNN backward propagation")
 
                 filterGrads = cnn_backward_prop(grads["dA0"], X_orig, imgShape, filteredCache, self.filters)
 
-            if self.debug_mode:
-                print("   Round " + str(i) + ": update parameters")
+            if self.debug_mode: print("   Round " + str(i) + ": update parameters")
 
             #update parameters
             self.params = update_params(self.params, self.layer_activation, grads, self.learning_rate)
@@ -215,16 +212,17 @@ class DeepLearner():
             #update filter if necessary
             if self.learning_type == "cnn":
 
-                if self.debug_mode:
-                    print("   Round " + str(i) + ": udpdate filters")
+                if self.debug_mode: print("   Round " + str(i) + ": udpdate filters")
 
                 self.filters = update_filters(self.filters, filterGrads, self.learning_rate)
 
             #print out cost
-            print("Round " + str(i) + " cost: " + str(cost) + ", accuracy: " +str(accuracy))
+            if verbose and i%verbose_iter == 0:
+                print("Round " + str(i) + " cost: " + str(round(cost, 10)) + ", accuracy: " +str(round(accuracy, 3)))
 
         self.plotTraining("accuracy")
 
+    #classify input and returns the probability
     def predictProba(self, X_input):
 
         X = np.asarray(X_input).copy()
@@ -238,6 +236,7 @@ class DeepLearner():
 
         return(probas[0])
 
+    #classify input with most likely class
     def predict(self, X_input, threshold=0.5):
 
         vec = self.predictProba(X_input)
@@ -253,14 +252,17 @@ class DeepLearner():
     #save model to file
     def saveModel(self, filename, path=os.getcwd(), type="pickle"):
 
+        #save all parameters in a dict
         modelDict = {}
 
+        #fill dict with training settings
         modelDict["layer_dimns"] = self.layer_dims
         modelDict["layer_activation"] = self.layer_activation
         modelDict["numberIterations"] = self.numberIterations
         modelDict["learning_rate"] = self.learning_rate
         modelDict["threshold"] = self.threshold
 
+        #fill dict with training results
         modelDict["params"] = self.params
         modelDict["costHistory"] = self.costHistory
         modelDict["accuracyHistory"] = self.accuracyHistory
@@ -302,6 +304,7 @@ class DeepLearner():
         self.costHistory = modelDict["costHistory"]
         self.accuracyHistory = modelDict["accuracyHistory"]
 
+    #plot training graph
     def plotTraining(self, type):
 
         if type == "cost":
@@ -319,6 +322,3 @@ class DeepLearner():
             plt.xlabel('iterations (in 100)')
             plt.title('Learning rate =' + str(self.learning_rate))
             plt.show()
-
-
-#source: https://towardsdatascience.com/lets-code-a-neural-network-in-plain-numpy-ae7e74410795
