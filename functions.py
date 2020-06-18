@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from numba import jit
 
 from sklearn.metrics import accuracy_score
@@ -152,7 +153,13 @@ def backward_prop(AL, Y, params, activation, cache, numClasses):
     return grads
 
 #compute cost for current model
-def compute_cost(AL, Y, numClasses, costType):
+def compute_cost(AL, Y, numClasses, costType, epsilon=True):
+
+    #use a super tiny value to prevent log(0) lead to -inf and consequently NaN for the cost
+    if epsilon:
+        e = np.nextafter(0, 1)
+    else:
+        e = 0
 
     #get number of entries
     m = AL.shape[1]
@@ -160,12 +167,16 @@ def compute_cost(AL, Y, numClasses, costType):
 
         #dependent on number of classes cost is calculated different
         if numClasses == 1:
-            cost = -1 / m * (np.dot(Y, np.log(AL).T) + np.dot(1 - Y, np.log(1 - AL).T))
+            cost = -1 / m * (np.dot(Y, np.log(AL + e).T) + np.dot(1 - Y, np.log(1 - AL + e).T))
             cost = cost[0][0] # get single value from cost
         else:
             cost = log_loss(Y.flatten(), AL.T)
 
-    return(cost)
+
+        #convert np float to regular float
+        cost = float(cost)
+
+    return cost
 
 #compute accuracy during training
 def compute_accuracy(AL, Y, numClasses, threshold):
@@ -181,6 +192,9 @@ def compute_accuracy(AL, Y, numClasses, threshold):
 
     #calc score
     score = accuracy_score(Y.flatten(), Y_pred.flatten())
+
+    #convert np float to regular float
+    score = float(score)
 
     return score
 
@@ -214,3 +228,15 @@ def checkErrors(layer_activation, layer_dims, X, Y):
 
     if X.shape[0] != Y.shape[0]:
         raise ValueError("X and Y have a different number of entries")
+
+    #check for NaN
+    if pd.isnull(X).any():
+        raise ValueError("The training data contains NaN values. Please clean the data")
+        #replace Nan with 0 so that the string test can work
+
+    #check for strings
+    temp = pd.DataFrame(X)
+    for col in temp:
+        if np.any([isinstance(val, str) for val in temp[col]]):
+            print("The training data contains string values. Please clean the data")
+            break

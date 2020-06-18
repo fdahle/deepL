@@ -28,21 +28,19 @@ def apply_filter(image, filters, stride=1, bias=0):
      image.shape[1] >= filters[0].shape[1], "Image size must be greater than the filter"
 
     #get outputSize
-    outX = (image.shape[0] - filters[0].shape[0])/stride + 1
-    outY = (image.shape[1] - filters[0].shape[1])/stride + 1
+    outXF = (image.shape[0] - filters[0].shape[0])/stride + 1
+    outYF = (image.shape[1] - filters[0].shape[1])/stride + 1
 
     #get half size of filter to substract this value from the image edges
     fhX = int(filters[0].shape[0] / 2) #filterHalfX
     fhY = int(filters[0].shape[1] / 2) #filterHalfY
 
-    ## TODO: find out how to solve this with numba
-    #check if filter can be applied with this stride
-    #if outX.is_integer() is False or outY.is_integer() is False:
-    #    raise ValueError('Filter can be applied to image with this size and stride')
+    outX = int(outXF)
+    outY = int(outYF)
 
-    ## TEMP:
-    outX = int(outX)
-    outY = int(outY)
+    #check if outX and outY have decimals
+    if outX - outXF != 0 or outY - outYF != 0:
+        raise ValueError("filtering cannot be adapted to this image. Adapt size or stride")
 
     #create empty list to save output
     outputs = []
@@ -79,17 +77,19 @@ def apply_filter(image, filters, stride=1, bias=0):
 def downsample(filtered, kSize=2, stride=2):
 
     #get size for the output image
-    outX = int((filtered[0].shape[0] - kSize)/stride + 1)
-    outY = int((filtered[0].shape[1] - kSize)/stride + 1)
+    outXF = int((filtered[0].shape[0] - kSize)/stride + 1)
+    outYF = int((filtered[0].shape[1] - kSize)/stride + 1)
 
     #get half size of pooling to substract this value from the image edges
     phX = int(kSize / 2) #poolingHalfX
     phY = int(kSize / 2) #poolingHalfY
 
-    ## TODO: check if outX and outY have decimals
-    # TODO: check if ksize is even
-    outX = int(outX)
-    outY = int(outY)
+    outX = int(outXF)
+    outY = int(outYF)
+
+    #check if outX and outY have decimals
+    if outX - outXF != 0 or outY - outYF != 0:
+        raise ValueError("pooling cannot be adapted to this image. Adapt kSize or stride")
 
     #create empty list to save output
     outputs = []

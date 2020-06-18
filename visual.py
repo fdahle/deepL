@@ -1,5 +1,6 @@
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import numpy as np
 import random
 
 class Node:
@@ -36,9 +37,11 @@ class Node:
             plt.pause(0.05)
 
     # Return a Matplotlib patch of the object
-    def mpl_patch(self, diskcolor= 'blue'):
+    def mpl_patch(self, diskcolor= 'white', edgecolor='black'):
 
-        self.mypatch =  mpl.patches.Circle( self.center, self.radius, facecolor = diskcolor, picker=1 )
+        self.mypatch =  mpl.patches.Circle( self.center, self.radius,
+                                           facecolor = diskcolor, edgecolor = edgecolor,
+                                           picker=1 )
 
         if self.fig != None:
             self.fig.canvas.mpl_connect('pick_event', self.on_click) # Activate the object's method
@@ -58,7 +61,9 @@ class Line:
         self.mypatch = None
 
     def mpl_patch(self):
-        self.mypatch =  mpl.patches.ConnectionPatch(self.start, self.end, "data", "data")
+        self.mypatch =  mpl.patches.ConnectionPatch(self.start, self.end,
+                                                    "data", "data",
+                                                     color="darkgray", zOrder=0.5)
 
         return self.mypatch
 
@@ -73,48 +78,54 @@ class Visual():
     #init the visual class that will contain the plots and dictionaries
     def __init__(self, showInput = False):
 
-        self.fig, self.ax = plt.subplots()
+        self.fig = plt.figure()
+        self.ax = plt.subplot()
+        self.fig.axes.append(self.ax)
         self.nodesDict = {}
         self.linesDict = {}
-        self.textDict = {}
+        self.activationDict = {}
         self.weightDict = {}
+        self.classDict = {}
 
         self.layer_dims = None
-        self.names = None
+        self.activation = None
         self.params = None
+        self.classes = None
 
         self.showInput = showInput
 
         self.ax.set_aspect('equal')
 
     #draw the basic neural network
-    def drawNetwork(self, layer_dims, names, params):
+    def drawNetwork(self, layer_dims, activation, params, Y):
+
+        self.layer_dims = layer_dims.copy()
+        self.activation = activation.copy()
+        self.params = params.copy()
+
+        self.classes = np.unique(Y)
 
         if self.showInput == False:
-            layer_dims.pop(0)
-            del params['W1']
-            del params['b1']
-
-        self.layer_dims = layer_dims
-        self.names = names
-        self.params = params
+            self.layer_dims.pop(0)
+            del self.params['W1']
+            del self.params['b1']
 
         #get size for x and y
-        maxX = len(layer_dims)
-        maxY = max(layer_dims)
+        maxX = len(self.layer_dims)
+        maxY = max(self.layer_dims)
 
-        self.ax.set(xlim=(0, maxX + 1), ylim = (0, maxY + 1))
+        self.ax.set(xlim=(0, maxX*3), ylim = (0, maxY + 2))
 
         #draw the nodes
         id = 0
-        for i, layer in enumerate(layer_dims):
+        for i, layer in enumerate(self.layer_dims):
 
             #for each node in layer
             for n in range(layer):
 
                 #set position for node
-                xPos = i + 1
-                yPos = n +  maxX / layer
+                xPos = i * 3 + 1
+                yPos = n + (maxY-layer)/2 + 2
 
                 #create node
                 node = Node((xPos, yPos), .2, id, self)
@@ -149,11 +160,10 @@ class Visual():
 
                 self.linesDict[str(startId)+"_"+str(endId)] = line
 
-        oldLayerId = 0
-        i = -1
         #draw the weights
+        oldLayerId = 0 #settings I for finding the right layer
+        i = -1 #settings II for finding the right layer
         for key in self.linesDict:
-
             #get line
             line = self.linesDict[key]
             layerId = line.layer
@@ -162,33 +172,71 @@ class Visual():
             start = line.start
             end = line.end
 
-            #get middle point of line
-            xMpos = (start[0] + end[0])/2
-            yMpos = (start[1] + end[1])/2
+            #get formula for line
+            coefficients = np.polyfit([start[0], end[0]], [start[1], end[1]], 1)
+            polynomial = np.poly1d(coefficients)
 
+            #determines how far away the weight should be displayed
+            posText = 0.2
+
+            #get line X distance
+            lineXwidth = end[0] - start[0]
+
+            #get point of line at posText
+            posX = start[0] + posText * lineXwidth
+            posY = posX*polynomial[1] + polynomial[0]
+
+
+            #increment if layer stays the same or reset
             if layerId == oldLayerId:
                 i = i + 1
             else:
                 i = -1
 
+            #find right layer
             layerId = int(layerId) + 2
+
+            #get weight
             text = params["W" + str(layerId)][0][i]
+
+            #round weight
             text = round(text, 3)
-            print(text)
-            weight = plt.text(xMpos, yMpos, text)
+
+            #plot text
+            weight = plt.text(posX, posY, text, fontsize=6,
+                              horizontalalignment='center',
+                              verticalalignment='center')
 
         #draw the names
-        for i, elem in enumerate(names):
+        for i, elem in enumerate(self.activation):
 
             #set position of text
-            xPos = i + 1
+            xPos = i * 3 + 1
             yPos = 0.5
 
             #set content of text
-            text = plt.text(xPos, yPos, elem)
+            text = plt.text(xPos, yPos, elem,
+                          horizontalalignment='center',
+                          verticalalignment='center')
 
             #save text to dict
-            self.textDict[str(xPos)] = text
+            self.activationDict[str(xPos)] = text
+
+        #draw the classes
+        for i, elem in enumerate(reversed(self.classes)):
+
+            #set position for class
+            xPos = maxX * 3 - 1
+            yPos = i + (maxY-max(self.layer_dims))/2 + 2
+
+            #set content of text
+            text = plt.text(xPos, yPos, elem,
+                          verticalalignment='center')
+
+
+            #save text to dict
+            self.classDict[str(yPos)] = text
 
     def show(self):
-        plt.show()
+        plt.ion() #interactive mode so that calculation can continue afer plot
+        self.fig.plot()

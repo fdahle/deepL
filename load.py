@@ -3,6 +3,7 @@ import pickle
 import numpy as np
 import pandas as pd
 import skimage.color
+import os.path
 
 from sklearn.preprocessing import LabelEncoder
 from sklearn.datasets import make_moons
@@ -29,6 +30,72 @@ def getSubset(data, type, count, online=False, seed=123):
 
     return output
 
+#load custom data and check for possible problems (Strings, NaN)
+def loadCustom(path, checkData=False):
+
+    if not os.path.exists(path):
+        raise ValueError("No file could be found at this location")
+
+    fileType = path[-3:]
+
+    # TODO: do other types
+    if fileType == "pkl":
+        file = open(path, 'rb')
+        data = pickle.load(file)
+        file.close()
+    elif fileType == "son":
+        file = open(path, 'rb')
+        jsonString = file.read()
+        modelDict = json.loads(jsonString)
+    else:
+        raise ValueError("this format is not supported")
+
+    #check the type of data and convert to nparray
+    if isinstance(data, np.ndarray):
+        #do nothing
+        pass
+    elif isinstance(data, pd.DataFrame):
+        data = data.to_numpy()
+    elif isinstance(data, list):
+        data = np.asarray(data)
+
+    #check data
+    if checkData == True:
+
+        #check for NaN
+        if pd.isnull(data).any():
+            print("This data contains NaN values")
+            #replace Nan with 0 so that the string test can work
+
+        #check for strings
+        temp = pd.DataFrame(data)
+        for col in temp:
+            if np.any([isinstance(val, str) for val in temp[col]]):
+                print("This data contains string values")
+                break
+
+    return data
+
+#clean data before usage
+def cleanData(data, clean=[]):
+
+    if "string" in clean:
+        temp = pd.DataFrame(data)
+        for col in temp:
+            if np.any([isinstance(val, str) for val in temp[col]]):
+                encoder = LabelEncoder()
+                encoder.fit(temp[col])
+                temp[col] = encoder.transform(temp[col])
+        data = temp.to_numpy()
+
+    data = data.astype('float64') 
+
+    if "nan" in clean:
+        data[np.isnan(data)] = 0
+
+
+    return data
+
 #distinguish between different type of example data
 def loadExamples(type):
 
@@ -50,8 +117,8 @@ def loadExamples(type):
 
 #get data for cats vs dogs
 def loadCats():
-    train_dataset = h5py.File('datasets/train_catvnoncat.h5', "r")
-    test_dataset = h5py.File('datasets/test_catvnoncat.h5', "r")
+    train_dataset = h5py.File('datasets/cats/train_catvnoncat.h5', "r")
+    test_dataset = h5py.File('datasets/cats/test_catvnoncat.h5', "r")
 
     train_x = np.array(train_dataset["train_set_x"][:]) # your train set features
     train_y = np.array(train_dataset["train_set_y"][:]) # your train set labels
@@ -65,7 +132,7 @@ def loadCats():
 
 #get data for sonar
 def loadSonar():
-    dataframe = pd.read_csv('datasets/sonar.csv', header=None)
+    dataframe = pd.read_csv('datasets/sonar/sonar.csv', header=None)
     dataset = dataframe.values
 
     np.random.shuffle(dataset)
@@ -90,8 +157,8 @@ def loadMnist():
     #train_data = np.loadtxt("datasets/mnist_train.csv", delimiter=",")
     #test_data = np.loadtxt("datasets/mnist_test.csv", delimiter=",")
 
-    train_data = np.load("datasets/mnist_train.npy")
-    test_data = np.load("datasets/mnist_test.npy")
+    train_data = np.load("datasets/mnist/mnist_train.npy")
+    test_data = np.load("datasets/mnist/mnist_test.npy")
 
     def reshape(data):
         output = data.reshape((28,28))
@@ -124,7 +191,6 @@ def loadCifar():
     classes = np.unique(np.asarray(train_y))
 
     return train_x, train_y, test_x, test_y, classes
-
 
 def loadMoons():
     X, y = make_moons(n_samples = 1000, noise=0.2, random_state=100)
