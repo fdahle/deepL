@@ -22,10 +22,16 @@ class DeepLearner():
         self.layer_dims = [4,3,2]
         self.layer_activation = ["relu","relu","relu"]
         self.numberIterations = 10000
+        self.batch_size = 50
+        self.costType = "crossEntropy"
+        self.costParams = []
+        self.scoreMetrics = ["accuracy"]
         self.learning_rate = 0.01
         self.threshold = 0.5
         self.numClasses = None
         self.early_stopping = None
+        self.class_weight = None
+        self.epsilon = True
 
         #default settings for cnn
         self.filters = None
@@ -40,7 +46,7 @@ class DeepLearner():
         #params for history
         self.params = None
         self.costHistory = None
-        self.accuracyHistory = None
+        self.scoreHistory = None
 
         #other settings
         self.visual_mode = False
@@ -56,7 +62,10 @@ class DeepLearner():
         print(target)
 
     #gives the possibility to change training parameters
-    def setTrainingParams(self, layer_dims=None, layer_activation=None, numberIterations=None, learning_rate=None, threshold=None, early_stopping = None):
+    def setTrainingParams(self, layer_dims=None, layer_activation=None, numberIterations=None,
+                          learning_rate=None, batch_size=None,
+                          threshold=None, early_stopping = None,
+                          costType=None, costParams=None, scoreMetrics=None, epsilon=None):
 
         if layer_dims is not None:
             self.layer_dims = layer_dims
@@ -66,13 +75,25 @@ class DeepLearner():
             self.numberIterations = numberIterations
         if learning_rate is not None:
             self.learning_rate = learning_rate
+        if batch_size is not None:
+            self.batch_size = batch_size
         if threshold is not None:
             self.threshold = threshold
         if early_stopping is not None:
             self.early_stopping = early_stopping
+        if costType is not None:
+            self.costType = costType
+        if costParams is not None:
+            self.costParams = costParams
+        if scoreMetrics is not None:
+            self.scoreMetrics = scoreMetrics
+        if epsilon is not None:
+            self.epsilon = epsilon
 
     #gives the possibility to change cnn parameters
-    def setCnnParams(self, filterX = None, filterY = None, numFilters = None, filterBias = None, filterStride=None, poolSize=None, poolStride=None):
+    def setCnnParams(self, filterX = None, filterY = None, numFilters = None,
+                     filterBias = None, filterStride=None,
+                     poolSize=None, poolStride=None):
 
         if filterX is not None:
             self.filterX = filterX
@@ -134,10 +155,6 @@ class DeepLearner():
         X = reshape(X) #(features, number of entries)
         Y = reshape(Y) #(number of classes, number of entries)
 
-        #copy X for later use in cnn
-        if self.learning_type == "cnn":
-            X_orig = X.copy()
-
         #adapt layer (add input and output layer)
         self.layer_dims = adapt_layer(self.layer_dims, self.layer_activation, X.shape[0], self.numClasses)
 
@@ -157,11 +174,11 @@ class DeepLearner():
 
         #create empty list to save history
         self.costHistory = []
-        self.accuracyHistory = []
+        self.scoreHistory = []
 
         #set params for early stopping
         maxCost = sys.maxsize #get maximum number so that first cost is def. lower
-        maxAccuracy = 0
+        maxScores = []
         stopCounter = 0
         bestParams = []
         bestFilters = []
@@ -171,111 +188,94 @@ class DeepLearner():
             inputLayerChanged = False
 
         #start training
-        for i in range(self.numberIterations):
+        for epoch in range(self.numberIterations):
+
+            batches = createBatches(X, self.batch_size)
+            batches_Y = createBatches(Y, self.batch_size)
 
             #get start time to measure how long a round will take
             rStart = time.time()
 
-            #execute cnn forward propagation
-            if self.learning_type == "cnn":
+            #iterate batches
+            for bt in range(len(batches)):
 
-                start = time.time()
+                #get batch
+                batch = batches[bt]
+                batch_y = batches_Y[bt]
 
-                #forward propagation for cnn
-                X, filteredCache = cnn_forward_prop(X_orig, self.filters, imgShape,
-                                                          self.filterStride, self.filterBias,
-                                                          self.poolStride, self.poolSize)
-
-                #when applying the filters and downsample the input size
-                #is changing and needs to be adapted only once
-                if inputLayerChanged == False:
-
-                    #change input layer
-                    self.layer_dims = changeInputLayer(self.layer_dims, X.shape[0])
-
-                    #with new layer_dims new params are needed
-                    self.params = init_params(self.layer_dims)
-
-                    #set bool so that the whole if clause is only done once
-                    inputLayerChanged = True
-
-                end = time.time()
-                dura = str(round(end - start, 4)) + "s"
-
-                if self.debug_mode: print("   Round " + str(i) + ": CNN forward propagation finished (" + dura + ")")
-
-            #execute forward propagation
-            start = time.time()
-            AL, cache = forward_prop(X, self.params, self.layer_activation)
-            end = time.time()
-            dura = str(round(end - start, 4)) + "s"
-            if self.debug_mode: print("   Round " + str(i) + ": forward propagation finished (" + dura + ")")
-
-
-            #compute cost and save
-            start = time.time()
-            cost = compute_cost(AL, Y, self.numClasses, "crossEntropy")
-            self.costHistory.append(cost)
-            end = time.time()
-            dura = str(round(end - start, 4)) + "s"
-            if self.debug_mode: print("   Round " + str(i) + ": computing costs finished (" + dura + ")")
-
-
-            #compute accuracy and save
-            start = time.time()
-            accuracy = compute_accuracy(AL, Y, self.numClasses, self.threshold)
-            self.accuracyHistory.append(accuracy)
-            end = time.time()
-            dura = str(round(end - start, 4)) + "s"
-            if self.debug_mode: print("   Round " + str(i) + ": computing accuracy finished (" + dura + ")")
-
-            #check if cost is improving
-            if cost < maxCost:
-                stopCounter = 0
-
-                #save best cost and accuracy
-                maxCost = cost
-                maxAccuracy = accuracy
-
-                #save params and filters of best cost
-                bestParams = self.params
+                #execute cnn forward propagation
                 if self.learning_type == "cnn":
-                    bestFilters = self.filters
 
-            stopCounter +=1
+                    #copy batch for later use in cnn
+                    batch_orig = batch.copy()
 
+                    output = debug(self.debug_mode, cnn_forward_prop, [
+                                                batch_orig, self.filters, imgShape,
+                                                self.filterStride, self.filterBias,
+                                                self.poolStride, self.poolSize])
+                    batch, filteredCache = output[0], output[1]
 
-            #execute backwards propagation
-            start = time.time()
-            grads = backward_prop(AL, Y, self.params, self.layer_activation, cache, self.numClasses)
-            end = time.time()
-            dura = str(round(end - start, 4)) + "s"
-            if self.debug_mode: print("   Round " + str(i) + ": backward propagation finished (" + dura + ")")
+                    #when applying the filters and downsample the input size
+                    #is changing and needs to be adapted only once
+                    if inputLayerChanged == False:
 
-            #execute cnn backwards propagation
-            if self.learning_type == "cnn":
+                        #change input layer
+                        self.layer_dims = changeInputLayer(self.layer_dims, X.shape[0])
 
-                start = time.time()
-                filterGrads = cnn_backward_prop(grads["dA0"], X_orig, imgShape, filteredCache, self.filters)
-                end = time.time()
-                dura = str(round(end - start, 4)) + "s"
-                if self.debug_mode: print("   Round " + str(i) + ": CNN backward propagation finished(" + dura + ")")
+                        #with new layer_dims new params are needed
+                        self.params = init_params(self.layer_dims)
 
-            #update parameters
-            start = time.time()
-            self.params = update_params(self.params, self.layer_activation, grads, self.learning_rate)
-            end = time.time()
-            dura = str(round(end - start, 4)) + "s"
-            if self.debug_mode: print("   Round " + str(i) + ": updating parameters finished(" + dura + ")")
+                        #set bool so that the whole if clause is only done once
+                        inputLayerChanged = True
 
-            #update filter if necessary
-            if self.learning_type == "cnn":
+                #execute forward propagation
+                output = debug(self.debug_mode, forward_prop, [batch, self.params, self.layer_activation])
+                AL, cache = output[0], output[1]
 
-                start = time.time()
-                self.filters = update_filters(self.filters, filterGrads, self.learning_rate)
-                end = time.time()
-                dura = str(round(end - start, 4)) + "s"
-                if self.debug_mode: print("   Round " + str(i) + ": udpdating filters finished (" + dura + ")")
+                #compute cost and save
+                output = debug(self.debug_mode, compute_cost, [AL, batch_y, self.numClasses, self.costType, self.epsilon, self.costParams])
+                cost = output[0]
+
+                #compute scores and save
+                if len(self.scoreMetrics) > 0:
+                    output = debug(self.debug_mode, compute_scores, [self.scoreMetrics, AL, batch_y, self.numClasses, self.threshold])
+                    scores = output[0]
+
+                #check if cost is improving
+                if cost < maxCost:
+                    stopCounter = 0
+
+                    #save best cost and scores
+                    maxCost = cost
+                    maxScores = scores
+
+                    #save params and filters of best cost
+                    bestParams = self.params
+                    if self.learning_type == "cnn":
+                        bestFilters = self.filters
+
+                #increase stop counter for early stopping
+                stopCounter +=1
+
+                #execute backwards propagation
+                output = debug(self.debug_mode, backward_prop, [AL, batch_y, self.params, self.layer_activation, cache, self.numClasses, self.costType, self.costParams])
+                grads = output[0]
+
+                #execute cnn backwards propagation
+                if self.learning_type == "cnn":
+
+                    output = debug(self.debug_mode, cnn_backward_prop, [grads["dA0"], batch_orig, imgShape, filteredCache, self.filters])
+                    filterGrads = output[0]
+
+                #update parameters
+                output = debug(self.debug_mode, update_params, [self.params, self.layer_activation, grads, self.learning_rate])
+                self.params = output[0]
+
+                #update filter if necessary
+                if self.learning_type == "cnn":
+
+                    output = debug(self.debug_mode, update_filters, [self.filters, filterGrads, self.learning_rate])
+                    self.filters = output[0]
 
             #stop if cost is not improving
             if self.early_stopping is not None:
@@ -288,24 +288,32 @@ class DeepLearner():
 
                     #remove last n entries from history
                     self.costHistory = self.costHistory[:len(self.costHistory)-self.early_stopping]
-                    self.accuracyHistory = self.accuracyHistory[:len(self.accuracyHistory)-self.early_stopping]
+                    self.scoreHistory = self.scoreHistory[:len(self.scoreHistory)-self.early_stopping]
 
                     if verbose:
-                        print('Early stopping after iteration %i: %f, accuracy: %a' % (i-self.early_stopping+1, maxCost, maxAccuracy))
+                        scoreString = ", "
+                        for j, elem in enumerate(self.scoreMetrics):
+                            scoreString = scoreString + elem + ": " + str(round(maxScores[j], 3)) + ", "
+                        scoreString = scoreString[:-2]
+                        print("Early stopping after round " + str(epoch-self.early_stopping+1) + " cost: " + str(round(maxCost, 10)) + scoreString + " (" + rDura + ")")
 
                     #exit the loop as no improvement was done
                     break
 
             #get start time to measure how long a round will take
             rEnd = time.time()
-            rDura = str(round(end - start, 4)) + "s"
+            rDura = str(round(rEnd - rStart, 4)) + "s"
 
             #todo rDura that time for all n things is summed (like for example 50)
 
             #print out cost
-            if verbose and i%verbose_iter == 0:
-                 print("Round " + str(i) + " cost: " + str(round(cost, 10)) + ", accuracy: " +str(round(accuracy, 3)) + " (" + rDura + ")")
-            
+            if verbose and epoch%verbose_iter == 0:
+                scoreString = ", "
+                for j, elem in enumerate(self.scoreMetrics):
+                    scoreString = scoreString + elem + ": " + str(round(scores[j], 3)) + ", "
+                scoreString = scoreString[:-2]
+                print("Round " + str(epoch) + " cost: " + str(round(cost, 10)) + scoreString + " (" + rDura + ")")
+
     #classify input and returns the probability
     def predictProba(self, X_input):
 
@@ -348,6 +356,8 @@ class DeepLearner():
         modelDict["numberIterations"] = self.numberIterations
         modelDict["learning_rate"] = self.learning_rate
         modelDict["threshold"] = self.threshold
+        modelDict["costType"] = self.costType
+        modelDict["scoreMetrics"] = self.scoreMetrics
 
         #fill dict with cnn settings
         if self.learning_type == "cnn":
@@ -366,7 +376,7 @@ class DeepLearner():
 
         #fill dict with history
         modelDict["costHistory"] = self.costHistory
-        modelDict["accuracyHistory"] = self.accuracyHistory
+        modelDict["scoreHistory"] = self.scoreHistory
 
         #save file as pickle file
         if format == "pickle":
@@ -433,6 +443,8 @@ class DeepLearner():
             self.numberIterations = modelDict["numberIterations"]
             self.learning_rate = modelDict["learning_rate"]
             self.threshold = modelDict["threshold"]
+            self.costType = modelDict["costType"]
+            self.scoreMetrics = modelDict["scoreMetrics"]
 
             #restore cnn settings
             if modelDict["learning_type"] == "cnn":
@@ -451,9 +463,10 @@ class DeepLearner():
 
             #restore history
             self.costHistory = modelDict["costHistory"]
-            self.accuracyHistory = modelDict["accuracyHistory"]
+            self.scoreHistory = modelDict["scoreHistory"]
         except:
             raise ValueError("The model file is corrupted.")
+
     #plot training graph
     def plotTraining(self, type):
 

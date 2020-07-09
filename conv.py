@@ -118,7 +118,15 @@ def downsample(filtered, kSize=2, stride=2):
     return outputs
 
 #forward propagation for cnn
-def cnn_forward_prop(X, filters, imgShape, fStride, fBias, pStride, pSize):
+def cnn_forward_prop(input):
+
+    X = input[0]
+    filters = input[1]
+    imgShape = input[2]
+    fStride = input[3]
+    fBias = input[4]
+    pStride = input[5]
+    pSize = input[6]
 
     output = []
     filteredCache = []
@@ -152,7 +160,7 @@ def cnn_forward_prop(X, filters, imgShape, fStride, fBias, pStride, pSize):
 
     #ouput = array with each element the flattenend results of all pooling images
     #filteredCache = unflattened filtered images
-    return output, filteredCache
+    return [output, filteredCache]
 
 @jit(nopython=True)
 def deapply_filter(img, cnnGrad, filters, stride=1):
@@ -234,7 +242,13 @@ def upsample(grads, cache, kSize=2, stride=2):
     return typed_outputs
 
 #backward propagation for cnn
-def cnn_backward_prop(grads, X, imgShape, cacheF, filters): #cacheF = filteredCache
+def cnn_backward_prop(input):
+
+    grads = input[0]
+    X = input[1]
+    imgShape = input[2]
+    cacheF = input[3] #cacheF = filteredCache
+    filters = input[4]
 
     cnnGrads = []
 
@@ -264,14 +278,18 @@ def cnn_backward_prop(grads, X, imgShape, cacheF, filters): #cacheF = filteredCa
     cnnGrads = np.asarray(cnnGrads)
     cnnGrads = cnnGrads.mean(axis=(0))
 
-    return cnnGrads
+    return [cnnGrads]
 
 #update the filters based on gradient and learning rate
-def update_filters(filters, gradient, learning_rate):
+def update_filters(input):
+
+    filters = input[0]
+    gradient = input[1]
+    learning_rate = input[2]
 
     filters -= learning_rate * gradient
 
-    return filters
+    return [filters]
 
 #change input layer to the new inputsize
 def changeInputLayer(layer_dims, inputSize):

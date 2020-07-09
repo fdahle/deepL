@@ -2,7 +2,10 @@ import numpy as np
 import pandas as pd
 from numba import jit
 
+import time
+
 from sklearn.metrics import accuracy_score
+from sklearn.metrics import recall_score
 from sklearn.metrics import log_loss
 
 #add input and output layer to layerDims
@@ -72,8 +75,12 @@ def activation_func(Z, type, direction, dA=0, Y=0):
     return output
 
 #execute the forward propagation
-def forward_prop(X, params, activation):
+def forward_prop(input):
     #in this function the value of the nodes are calculated
+
+    X = input[0]
+    params = input[1]
+    activation = input[2]
 
     #save intermediate steps in this dict
     cache={}
@@ -105,10 +112,19 @@ def forward_prop(X, params, activation):
 
     #A_curr is output at the end nodes
     #cache contains all intermediate outputs; A[n] contains the input, Z[n+1] the output of this input
-    return A_curr, cache
+    return [A_curr, cache]
 
 #execute backwars propagation
-def backward_prop(AL, Y, params, activation, cache, numClasses):
+def backward_prop(input):
+
+    AL = input[0]
+    Y = input[1]
+    params = input[2]
+    activation = input[3]
+    cache = input[4]
+    numClasses = input[5]
+    costType = input[6]
+    costParams = input[7]
 
     #this dictionary will save the gradients
     grads = {}
@@ -120,10 +136,32 @@ def backward_prop(AL, Y, params, activation, cache, numClasses):
     #Y = Y.reshape(AL.shape)
 
     #different creation of base gradient based on number of classes
-    if numClasses == 1:
-        dA_prev = -(np.divide(Y, AL) - np.divide(1 - Y, 1 - AL))
-    else:
-        dA_prev = AL
+    if costType == "crossEntropy":
+        if numClasses == 1:
+            #use derivative of cross Entroy
+            dA_prev = -(np.divide(Y, AL) - np.divide(1 - Y, 1 - AL))
+        else:
+            dA_prev = AL
+            dA_prev[range(m),Y] -= 1
+            dA_prev = dA_prev/1
+
+    if costType == "focalLoss":
+
+        #check if loss params are defined
+        if len(costParams) == 0:
+            gamma = 2.0
+            alpha = 0.25
+        else:
+            gamma = costParams[0]
+            alpha = costParams[1]
+
+        if numClasses == 1:
+
+            pt_0 = np.where(np.equal(Y, 0), AL, np.zeros_like(AL))
+            pt_1 = np.where(np.equal(Y, 1), AL, np.ones_like(AL))
+
+            dA_prev = Y * np.power(1. - pt_1, gamma) * (Y * np.log(pt_1) + pt_0 - 1)
+
 
     #iterate through the layers from right to left
     for i, layer in reversed(list(enumerate(activation))):
@@ -150,10 +188,20 @@ def backward_prop(AL, Y, params, activation, cache, numClasses):
         grads["dW" + str(idx)] = dW_curr
         grads["db" + str(idx)] = db_curr
 
-    return grads
+    return [grads]
 
 #compute cost for current model
-def compute_cost(AL, Y, numClasses, costType, epsilon=True):
+def compute_cost(input):
+
+    AL = input[0]
+    Y = input[1]
+    numClasses = input[2]
+    costType = input[3]
+    epsilon=input[4]
+    costParams=input[5]
+
+    #get number of entries
+    m = AL.shape[1]
 
     #use a super tiny value to prevent log(0) lead to -inf and consequently NaN for the cost
     if epsilon:
@@ -161,25 +209,53 @@ def compute_cost(AL, Y, numClasses, costType, epsilon=True):
     else:
         e = 0
 
-    #get number of entries
-    m = AL.shape[1]
-    if costType == "crossEntropy":
-
+    if costType == "crossEntropy": #aka log loss in ml
         #dependent on number of classes cost is calculated different
         if numClasses == 1:
+            #binary cross entropy
             cost = -1 / m * (np.dot(Y, np.log(AL + e).T) + np.dot(1 - Y, np.log(1 - AL + e).T))
             cost = cost[0][0] # get single value from cost
         else:
+            #cross entropy
             cost = log_loss(Y.flatten(), AL.T)
 
+    elif costType == "focalLoss":
 
-        #convert np float to regular float
-        cost = float(cost)
+        #check if loss params are defined
+        if len(costParams) == 0:
+            gamma = 2.0
+            alpha = 0.25
+        else:
+            gamma = costParams[0]
+            alpha = costParams[1]
 
-    return cost
+        if numClasses == 1:
+
+            pt_0 = np.where(np.equal(Y, 0), AL, np.zeros_like(AL))
+            pt_1 = np.where(np.equal(Y, 1), AL, np.ones_like(AL))
+
+
+            #cost = -np.sum(alpha * np.power(1. - pt_1, gamma) * np.log(pt_1))-np.sum((1-alpha) * np.power( pt_0, gamma) * np.log(1. - pt_0))
+
+            cost = -np.mean(alpha * np.power(1. - pt_1, gamma) * np.log(pt_1))-np.sum((1-alpha) * np.power( pt_0, gamma) * np.log(1. - pt_0))
+
+
+    else:
+        raise Error("Cost function not supported")
+
+    #convert np float to regular float
+    cost = float(cost)
+
+    return [cost]
 
 #compute accuracy during training
-def compute_accuracy(AL, Y, numClasses, threshold):
+def compute_scores(input):
+
+    types = input[0]
+    AL = input[1]
+    Y = input[2]
+    numClasses = input[3]
+    threshold = input[4]
 
     #dependent on number of classes accuracy is calculated different
     if numClasses == 1:
@@ -190,22 +266,55 @@ def compute_accuracy(AL, Y, numClasses, threshold):
         Y_pred = np.argmax(AL, axis=0)
         Y_pred = np.reshape(Y_pred, (1, -1))
 
-    #calc score
-    score = accuracy_score(Y.flatten(), Y_pred.flatten())
+    scores = []
 
-    #convert np float to regular float
-    score = float(score)
+    #check which value should be calculated
+    for elem in types:
+        if elem == "accuracy":
+            #calc score
+            score = accuracy_score(Y.flatten(), Y_pred.flatten())
+        if elem == "pr":
+            score = recall_score(Y.flatten(), Y_pred.flatten())
 
-    return score
+        #convert np float to regular float
+        score = float(score)
+        scores.append(score)
+
+    return [scores]
 
 #udpdate weight and bias
-def update_params(params, activation, grads, learning_rate):
+def update_params(input):
+
+    params = input[0]
+    activation = input[1]
+    grads = input[2]
+    learning_rate = input[3]
 
     for i, layer in enumerate(activation):
         idx = i + 1
         params["W" + str(idx)] -= learning_rate * grads["dW" + str(idx)]
         params["b" + str(idx)] -= learning_rate * grads["db" + str(idx)]
-    return params
+
+    return [params]
+
+#create batches
+def createBatches(data, batch_size):
+
+    #no batches should be created
+    if batch_size == 0:
+        return [data]
+
+    #no need to split if batch size exceeds data size
+    if batch_size >= data.shape[1]:
+        return[data]
+
+    #get number of batches
+    num_batches = int(data.shape[1] / batch_size)
+
+    #split
+    batches = np.array_split(data, num_batches, axis=1)
+
+    return batches
 
 # reshape data so that it can be used by NN
 def reshape(data):
@@ -223,6 +332,10 @@ def hasNaN(data):
 #check data and settings for consistency
 def checkErrors(layer_activation, layer_dims, X, Y):
 
+    #give warning if hidden layers are bigger than input layers
+    if layer_dims[0] > X.shape[1]:
+        print("Warning: Hidden layer is bigger than input layer")
+
     if len(layer_activation) != len(layer_dims):
         raise ValueError("Layer dimensions (layer_dims) and activationtype (layer_activation) must have the same size")
 
@@ -235,8 +348,20 @@ def checkErrors(layer_activation, layer_dims, X, Y):
         #replace Nan with 0 so that the string test can work
 
     #check for strings
-    temp = pd.DataFrame(X)
-    for col in temp:
-        if np.any([isinstance(val, str) for val in temp[col]]):
-            print("The training data contains string values. Please clean the data")
-            break
+    temp = pd.DataFrame(X.flatten())
+    temp = temp.apply(lambda x: pd.to_numeric(x, errors='coerce')) #convert to int, so strings will be nan
+    if pd.isnull(temp).values.any():
+        raise ValueError("The training data contains string values. Please clean the data")
+
+def debug(debugMode, func, args):
+
+    if debugMode:
+        start = time.time()
+        output = func(args)
+        end = time.time()
+        dura = str(round(end - start, 4)) + "s"
+        print("     " + func.__name__ + " finished (" + dura + ")")
+    else:
+        output = func(args)
+
+    return output
