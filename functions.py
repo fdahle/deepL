@@ -43,7 +43,7 @@ def init_params(layer_dims):
     return parameters
 
 #defines the output of a certain neuron based on type
-def activation_func(Z, type, direction, dA=0, Y=0):
+def activation_func(Z, type, direction, Y=0, alpha=0.01):
 
     #prevents an overflow of the values (precision too high)
     Z = np.clip(Z, -500,500)
@@ -53,14 +53,38 @@ def activation_func(Z, type, direction, dA=0, Y=0):
             output = 1/(1+np.exp(-Z))
         if direction == "backward":
             sig = activation_func(Z, "sigmoid", "forward")
-            output = dA * sig * (1 - sig)
+            output = sig * (1 - sig)
+
+    if type == "tanH":
+        if direction == "forward":
+            output = np.tanh(Z)
+        if direction == "backward":
+            output = 1 - (np.tanh(Z) * np.tanh(Z))
+
+    if type == "elu":
+        if direction == "forward":
+            pass
+        if direction == "backward":
+            pass
 
     if type == "relu":
         if direction == "forward":
             output = np.maximum(0,Z)
         if direction == "backward":
-            output = np.array(dA, copy = True)
+            output = np.ones_like(Z)
             output[Z <= 0] = 0
+
+
+    if type == "leakyRelu":
+        if direction == "forward":
+            y1 = ((Z >= 0) * Z)
+            y2 = ((Z < 0) * Z * alpha)
+            output = y1 + y2
+
+        if direction == "backward":
+            output = np.ones_like(Z)
+            output[Z < 0] = alpha
+
 
     if type == "softmax":
         if direction == "forward":
@@ -178,7 +202,7 @@ def backward_prop(input):
         b_curr = params["b" + str(idx)]
 
         #calculate all gradient
-        dZ_curr = activation_func(Z_curr, layer, "backward", dA_curr, Y)
+        dZ_curr = dA_curr * activation_func(Z_curr, layer, "backward", Y)
         dW_curr = np.dot(dZ_curr, A_prev.T) / m
         db_curr = np.sum(dZ_curr, axis=1, keepdims=True) / m
         dA_prev = np.dot(W_curr.T, dZ_curr)

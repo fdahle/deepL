@@ -28,7 +28,7 @@ train_x, train_y, test_x, test_y, classes = loadExamples("makeMoons")
 #initialize the DeepLearner
 deepL = DeepLearner(learning_type="classic")
 
-deepL.setTrainingParams(layer_dims=[128, 64, 32], layer_activation=["relu", "relu", "relu"], early_stopping=500)
+deepL.setTrainingParams(layer_dims=[128, 64, 32], layer_activation=["leakyRelu", "leakyRelu", "leakyRelu"], early_stopping=500)
 deepL.setTrainingParams(numberIterations=10000)
 deepL.setTrainingParams(costType="crossEntropy", scoreMetrics=["accuracy", "pr"])
 
